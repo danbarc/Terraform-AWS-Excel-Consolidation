@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rastreamento de Obras - Consolidação</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    body { background: linear-gradient(135deg, #f3f4f6, #e5e7eb); }
+    .card { transition: all 0.3s; }
+    .card:hover { transform: translateY(-4px); box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1); }
+  </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-6">
+  <div class="max-w-2xl w-full">
+    <div class="bg-white rounded-3xl shadow-2xl overflow-hidden card">
+      <!-- Header -->
+      <div class="bg-gradient-to-r from-blue-600 to-indigo-700 text-white p-8 text-center">
+        <h1 class="text-3xl font-bold flex items-center justify-center gap-3">
+          <i class="fas fa-file-excel"></i>
+          Rastreamento de Códigos
+        </h1>
+        <p class="mt-2 opacity-90">Consolidação de Planilhas Excel</p>
+      </div>
+
+      <div class="p-8 space-y-8">
+        <!-- Upload Section -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">Enviar Arquivos Excel</label>
+          <div id="drop-zone"
+               class="border-2 border-dashed border-gray-300 rounded-2xl p-12 text-center hover:border-blue-500 transition-colors cursor-pointer">
+            <i class="fas fa-cloud-upload-alt text-5xl text-gray-400 mb-4"></i>
+            <p class="text-lg font-medium text-gray-600">Arraste os arquivos aqui ou</p>
+            <button onclick="document.getElementById('file-input').click()"
+                    class="mt-4 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition">
+              Selecionar Arquivos
+            </button>
+            <input type="file" id="file-input" multiple accept=".xlsx,.xltm" class="hidden">
+          </div>
+          <p class="text-xs text-gray-500 mt-2 text-center">Máximo: 200 arquivos • .xlsx e .xltm</p>
+        </div>
+
+        <!-- Uploaded Files List -->
+        <div id="files-list" class="hidden">
+          <h3 class="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+            <i class="fas fa-list"></i> Arquivos Enviados
+          </h3>
+          <ul id="file-items" class="space-y-2 max-h-60 overflow-auto"></ul>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex gap-4">
+          <button onclick="uploadFiles()" id="upload-btn"
+                  class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-4 rounded-2xl transition disabled:opacity-50">
+            <i class="fas fa-upload"></i> Enviar Arquivos
+          </button>
+          
+          <button onclick="startProcessing()" id="process-btn" disabled
+                  class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-4 rounded-2xl transition disabled:opacity-50">
+            <i class="fas fa-cogs"></i> Processar Tudo
+          </button>
+        </div>
+
+        <!-- Status -->
+        <div id="status" class="hidden p-4 rounded-2xl bg-gray-50 border border-gray-200"></div>
+
+        <!-- Download Section -->
+        <div id="download-section" class="hidden p-6 bg-emerald-50 border border-emerald-200 rounded-2xl text-center">
+          <i class="fas fa-check-circle text-5xl text-emerald-500 mb-4"></i>
+          <h3 class="text-xl font-bold text-emerald-700">Processamento Concluído!</h3>
+          <a id="download-link"
+             class="mt-6 inline-flex items-center gap-3 bg-emerald-600 text-white px-8 py-4 rounded-2xl hover:bg-emerald-700 transition text-lg font-semibold">
+            <i class="fas fa-download"></i> Baixar rastreamento_codigos.xlsx
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <p class="text-center text-gray-500 text-sm mt-6">
+      Ferramenta Interna • Executado na AWS
+    </p>
+  </div>
+
+  <script>
+    const API_BASE = "https://lbpg46psb2.execute-api.sa-east-1.amazonaws.com";
+    let jobId = null;
+    let selectedFiles = [];
+
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const filesList = document.getElementById('files-list');
+    const fileItems = document.getElementById('file-items');
+
+    // Drag & Drop
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('border-blue-500'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-blue-500'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('border-blue-500');
+      handleFiles(e.dataTransfer.files);
+    });
+
+    fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+
+    function handleFiles(files) {
+      selectedFiles = Array.from(files);
+      renderFileList();
+      document.getElementById('upload-btn').disabled = false;
+    }
+
+    function renderFileList() {
+      fileItems.innerHTML = '';
+      selectedFiles.forEach((file, i) => {
+        const li = document.createElement('li');
+        li.className = "flex items-center justify-between bg-gray-50 px-4 py-3 rounded-xl";
+        li.innerHTML = `
+          <div class="flex items-center gap-3">
+            <i class="fas fa-file-excel text-emerald-600"></i>
+            <span class="font-medium">${file.name}</span>
+          </div>
+          <span class="text-sm text-gray-500">${(file.size/1024/1024).toFixed(2)} MB</span>
+        `;
+        fileItems.appendChild(li);
+      });
+      filesList.classList.remove('hidden');
+    }
+
+    async function uploadFiles() {
+      if (!selectedFiles.length) return;
+
+      const formData = new FormData();
+      selectedFiles.forEach(file => formData.append('files', file));
+
+      const status = document.getElementById('status');
+      status.classList.remove('hidden');
+      status.innerHTML = `<p class="text-blue-600"><i class="fas fa-spinner fa-spin"></i> Enviando arquivos...</p>`;
+
+      try {
+        const res = await fetch(`${API_BASE}/upload`, {
+          method: 'POST',
+          body: formData
+        });
+
+        const data = await res.json();
+
+        if (data.job_id) {
+          jobId = data.job_id;
+          status.innerHTML = `<p class="text-emerald-600">✅ ${data.files_uploaded} arquivos enviados com sucesso!</p>`;
+          document.getElementById('process-btn').disabled = false;
+        }
+      } catch (err) {
+        status.innerHTML = `<p class="text-red-600">Erro no upload: ${err.message}</p>`;
+      }
+    }
+
+    async function startProcessing() {
+      if (!jobId) return;
+
+      const status = document.getElementById('status');
+      status.innerHTML = `<p class="text-blue-600"><i class="fas fa-spinner fa-spin"></i> Processando ${selectedFiles.length} arquivos...</p>`;
+
+      try {
+        const res = await fetch(`${API_BASE}/process`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ job_id: jobId })
+        });
+
+        const result = await res.json();
+
+        if (result.download_url) {
+          document.getElementById('download-link').href = result.download_url;
+          document.getElementById('download-section').classList.remove('hidden');
+          status.innerHTML = `<p class="text-emerald-700 font-medium">${result.rows_processed} linhas consolidadas com sucesso!</p>`;
+        }
+      } catch (err) {
+        status.innerHTML = `<p class="text-red-600">Erro no processamento: ${err.message}</p>`;
+      }
+    }
+  </script>
+</body>
+</html>

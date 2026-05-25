@@ -1,0 +1,30 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+terraform.tfstate*
+crash.log
+*.tfvars
+*.tfvars.json
+.terraform/
+.terraform.lock.hcl
+
+# Lambda build artifacts
+lambda/*.zip
+lambda/upload.zip
+lambda/process.zip
+layer/layer.zip
+layer/python/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+*.DS_Store
+
+# Environment
+.env
