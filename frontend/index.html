@@ -83,101 +83,112 @@
   </div>
 
   <script>
-    const API_BASE = "https://lbpg46psb2.execute-api.sa-east-1.amazonaws.com";
-    let jobId = null;
-    let selectedFiles = [];
+  const API_BASE = "https://lbpg46psb2.execute-api.sa-east-1.amazonaws.com";
 
-    const dropZone = document.getElementById('drop-zone');
-    const fileInput = document.getElementById('file-input');
-    const filesList = document.getElementById('files-list');
-    const fileItems = document.getElementById('file-items');
+  let currentJobId = null;   // Nome mais claro
+  let selectedFiles = [];
 
-    // Drag & Drop
-    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('border-blue-500'); });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-blue-500'));
-    dropZone.addEventListener('drop', e => {
-      e.preventDefault();
-      dropZone.classList.remove('border-blue-500');
-      handleFiles(e.dataTransfer.files);
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('file-input');
+  const filesList = document.getElementById('files-list');
+  const fileItems = document.getElementById('file-items');
+  const status = document.getElementById('status');
+
+  // Drag & Drop + File Input
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('border-blue-500'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-blue-500'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('border-blue-500');
+    handleFiles(e.dataTransfer.files);
+  });
+
+  fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+
+  function handleFiles(files) {
+    selectedFiles = Array.from(files);
+    renderFileList();
+    document.getElementById('upload-btn').disabled = false;
+  }
+
+  function renderFileList() {
+    fileItems.innerHTML = '';
+    selectedFiles.forEach(file => {
+      const li = document.createElement('li');
+      li.className = "flex items-center justify-between bg-gray-50 px-4 py-3 rounded-xl";
+      li.innerHTML = `
+        <div class="flex items-center gap-3">
+          <i class="fas fa-file-excel text-emerald-600"></i>
+          <span class="font-medium">${file.name}</span>
+        </div>
+        <span class="text-sm text-gray-500">${(file.size/1024/1024).toFixed(2)} MB</span>
+      `;
+      fileItems.appendChild(li);
     });
+    filesList.classList.remove('hidden');
+  }
 
-    fileInput.addEventListener('change', () => handleFiles(fileInput.files));
+  async function uploadFiles() {
+    if (!selectedFiles.length) return;
 
-    function handleFiles(files) {
-      selectedFiles = Array.from(files);
-      renderFileList();
-      document.getElementById('upload-btn').disabled = false;
+    const formData = new FormData();
+    selectedFiles.forEach(file => formData.append('files', file));
+
+    status.classList.remove('hidden');
+    status.innerHTML = `<p class="text-blue-600"><i class="fas fa-spinner fa-spin"></i> Enviando...</p>`;
+
+    try {
+      const res = await fetch(`${API_BASE}/upload`, { method: 'POST', body: formData });
+      const data = await res.json();
+      
+      console.log("=== UPLOAD RESPONSE ===", data);
+
+      if (data.job_id) {
+        currentJobId = data.job_id;
+        console.log("✅ Job ID salvo:", currentJobId);
+        status.innerHTML = `<p class="text-emerald-600">✅ Arquivos enviados! Job ID: ${currentJobId}</p>`;
+        document.getElementById('process-btn').disabled = false;
+      } else {
+        status.innerHTML = `<p class="text-red-600">Erro: ${data.error || 'Sem job_id'}</p>`;
+      }
+    } catch (err) {
+      console.error("Upload error:", err);
+      status.innerHTML = `<p class="text-red-600">Erro: ${err.message}</p>`;
+    }
+  }
+
+  async function startProcessing() {
+    console.log("Process button clicked. Current Job ID:", currentJobId);
+
+    if (!currentJobId) {
+      status.innerHTML = `<p class="text-red-600">Primeiro envie os arquivos!</p>`;
+      return;
     }
 
-    function renderFileList() {
-      fileItems.innerHTML = '';
-      selectedFiles.forEach((file, i) => {
-        const li = document.createElement('li');
-        li.className = "flex items-center justify-between bg-gray-50 px-4 py-3 rounded-xl";
-        li.innerHTML = `
-          <div class="flex items-center gap-3">
-            <i class="fas fa-file-excel text-emerald-600"></i>
-            <span class="font-medium">${file.name}</span>
-          </div>
-          <span class="text-sm text-gray-500">${(file.size/1024/1024).toFixed(2)} MB</span>
-        `;
-        fileItems.appendChild(li);
+    status.innerHTML = `<p class="text-blue-600"><i class="fas fa-spinner fa-spin"></i> Processando ${selectedFiles.length} arquivos...</p>`;
+
+    try {
+      const res = await fetch(`${API_BASE}/process`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_id: currentJobId })
       });
-      filesList.classList.remove('hidden');
-    }
 
-    async function uploadFiles() {
-      if (!selectedFiles.length) return;
+      const result = await res.json();
+      console.log("=== PROCESS RESPONSE ===", result);
 
-      const formData = new FormData();
-      selectedFiles.forEach(file => formData.append('files', file));
-
-      const status = document.getElementById('status');
-      status.classList.remove('hidden');
-      status.innerHTML = `<p class="text-blue-600"><i class="fas fa-spinner fa-spin"></i> Enviando arquivos...</p>`;
-
-      try {
-        const res = await fetch(`${API_BASE}/upload`, {
-          method: 'POST',
-          body: formData
-        });
-
-        const data = await res.json();
-
-        if (data.job_id) {
-          jobId = data.job_id;
-          status.innerHTML = `<p class="text-emerald-600">✅ ${data.files_uploaded} arquivos enviados com sucesso!</p>`;
-          document.getElementById('process-btn').disabled = false;
-        }
-      } catch (err) {
-        status.innerHTML = `<p class="text-red-600">Erro no upload: ${err.message}</p>`;
+      if (result.download_url) {
+        document.getElementById('download-link').href = result.download_url;
+        document.getElementById('download-section').classList.remove('hidden');
+        status.innerHTML = `<p class="text-emerald-700">Sucesso! ${result.rows_processed || ''} linhas processadas.</p>`;
+      } else {
+        status.innerHTML = `<p class="text-red-600">Erro: ${result.error || 'Falha no processamento'}</p>`;
       }
+    } catch (err) {
+      console.error("Process error:", err);
+      status.innerHTML = `<p class="text-red-600">Erro: ${err.message}</p>`;
     }
-
-    async function startProcessing() {
-      if (!jobId) return;
-
-      const status = document.getElementById('status');
-      status.innerHTML = `<p class="text-blue-600"><i class="fas fa-spinner fa-spin"></i> Processando ${selectedFiles.length} arquivos...</p>`;
-
-      try {
-        const res = await fetch(`${API_BASE}/process`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ job_id: jobId })
-        });
-
-        const result = await res.json();
-
-        if (result.download_url) {
-          document.getElementById('download-link').href = result.download_url;
-          document.getElementById('download-section').classList.remove('hidden');
-          status.innerHTML = `<p class="text-emerald-700 font-medium">${result.rows_processed} linhas consolidadas com sucesso!</p>`;
-        }
-      } catch (err) {
-        status.innerHTML = `<p class="text-red-600">Erro no processamento: ${err.message}</p>`;
-      }
-    }
-  </script>
+  }
+</script>
 </body>
 </html>

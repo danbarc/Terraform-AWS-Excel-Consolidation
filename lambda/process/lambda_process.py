@@ -2,13 +2,11 @@ import pandas as pd
 import boto3
 import os
 import re
-from datetime import datetime
 import json
+from datetime import datetime
 
 s3 = boto3.client('s3')
 BUCKET_NAME = os.environ.get('BUCKET_NAME')
-
-# ====================  ORIGINAL FUNCTIONS ====================
 
 def is_date_format(value):
     if not isinstance(value, str):
@@ -26,24 +24,49 @@ def is_date_format(value):
             return None
     return None
 
-
 def lambda_handler(event, context):
+    print("=== PROCESS LAMBDA STARTED ===")
+    print("Full event keys:", list(event.keys()))
+    if 'body' in event:
+        print("Body received:", event['body'][:500] if isinstance(event['body'], str) else event['body'])
+    
     try:
-        bucket = event.get('bucket', BUCKET_NAME)
-        job_id = event.get('job_id')
+        job_id = None
+        
+        # Try to get job_id from different possible locations
+        if 'body' in event and event['body']:
+            try:
+                body = json.loads(event['body'])
+                job_id = body.get('job_id')
+                print("Parsed from JSON body:", job_id)
+            except Exception as json_err:
+                print("JSON parse error:", str(json_err))
+                # Try as plain text
+                if isinstance(event['body'], str):
+                    job_id = event['body'].strip()
+        
+        if not job_id and 'job_id' in event:
+            job_id = event.get('job_id')
+            print("Direct from event:", job_id)
+        
+        print("Final Job ID used:", job_id)
         
         if not job_id:
-            return {"statusCode": 400, "body": json.dumps({"error": "job_id is required"})}
+            return {
+                "statusCode": 400,
+                "headers": {"Access-Control-Allow-Origin": "*"},
+                "body": json.dumps({"error": "job_id is required", "debug_info": "Check body parsing"})
+            }
         
+        bucket = event.get('bucket', BUCKET_NAME)
         job_prefix = f"jobs/{job_id}/"
         
-        # List all files in the job
+        # List files in job folder
         response = s3.list_objects_v2(Bucket=bucket, Prefix=job_prefix)
         files = response.get('Contents', [])
         
         dados_combinados = []
         temp_dir = "/tmp"
-        
         processed_count = 0
         
         for file_obj in files:
@@ -54,7 +77,6 @@ def lambda_handler(event, context):
             filename = os.path.basename(key)
             print(f"Processando arquivo: {filename}")
             
-            # Download to /tmp
             local_path = os.path.join(temp_dir, filename)
             s3.download_file(bucket, key, local_path)
             
@@ -66,7 +88,7 @@ def lambda_handler(event, context):
                     
                     df = excel_file.parse(aba, header=None)
                     
-                    # === FIND OBRA (CLIENTE) ===
+                    # Find Obra (CLIENTE)
                     obra = "Desconhecido"
                     encontrou_cliente = False
                     for i in range(len(df)):
@@ -84,7 +106,7 @@ def lambda_handler(event, context):
                         if encontrou_cliente:
                             break
                     
-                    # === FIND DATE ===
+                    # Find Data
                     data = None
                     for i in range(len(df)):
                         for j in range(len(df.columns)):
@@ -102,7 +124,7 @@ def lambda_handler(event, context):
                         if data is not None:
                             break
                     
-                    # === FIND DATA SECTION (QTD. to VOLUME) ===
+                    # Find data section
                     linha_inicio = None
                     linha_fim = None
                     for i in range(len(df)):
@@ -123,21 +145,18 @@ def lambda_handler(event, context):
                     if linha_fim is None:
                         linha_fim = len(df)
                     
-                    # Read data section
                     num_linhas = linha_fim - (linha_inicio + 1)
                     if num_linhas <= 0:
                         continue
                         
                     df_dados = excel_file.parse(aba, skiprows=linha_inicio + 1, nrows=num_linhas)
                     
-                    # Select columns C, D, E, F (0-based indices 2,3,4,5)
                     if len(df_dados.columns) > 5:
                         df_dados = df_dados.iloc[:, [2, 3, 4, 5]]
                         df_dados.columns = ["Código", "Item", "Qtd", "UN"]
                     
                     df_dados = df_dados.dropna(subset=["Código"], how="all")
                     
-                    # Add metadata
                     df_dados["Obra"] = obra
                     df_dados["Arquivo"] = filename
                     df_dados["Data"] = data
@@ -154,6 +173,7 @@ def lambda_handler(event, context):
         if not dados_combinados:
             return {
                 "statusCode": 200,
+                "headers": {"Access-Control-Allow-Origin": "*"},
                 "body": json.dumps({"status": "warning", "message": "Nenhum dado válido encontrado"})
             }
         
@@ -169,13 +189,14 @@ def lambda_handler(event, context):
         resultado.to_excel(output_path, index=False)
         s3.upload_file(output_path, bucket, output_key)
         
-        # Generate presigned URL
+        # Presigned URL
         download_url = s3.generate_presigned_url('get_object',
                                                  Params={'Bucket': bucket, 'Key': output_key},
                                                  ExpiresIn=3600)
         
         return {
             "statusCode": 200,
+            "headers": {"Access-Control-Allow-Origin": "*"},
             "body": json.dumps({
                 "status": "success",
                 "job_id": job_id,
@@ -189,5 +210,6 @@ def lambda_handler(event, context):
         print(f"Critical error: {str(e)}")
         return {
             "statusCode": 500,
+            "headers": {"Access-Control-Allow-Origin": "*"},
             "body": json.dumps({"error": str(e)})
         }
